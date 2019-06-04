@@ -127,6 +127,7 @@ public: //Unreal specific methods
     void possess();
     void setRCForceFeedback(float rumble_strength, float auto_center);
 
+    
 private: //methods
     bool canTeleportWhileMove()  const;
     void allowPassthroughToggleInput();

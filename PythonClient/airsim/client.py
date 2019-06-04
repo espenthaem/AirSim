@@ -201,6 +201,9 @@ class VehicleClient:
     def waitOnLastTask(timeout_sec = float('nan')):
         return self.client.call('waitOnLastTask', timeout_sec)
 
+    def simGetBoundingBox(self, object_name = ''):
+        return self.client.call('simGetBoundingBox', object_name)
+
     # legacy handling
     # TODO: remove below legacy wrappers in future major releases
     upgrade_api_help = "\nPlease see https://github.com/Microsoft/AirSim/blob/master/docs/upgrade_apis.md for more info."

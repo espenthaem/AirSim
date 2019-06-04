@@ -35,6 +35,8 @@ public:
     virtual Pose getObjectPose(const std::string& object_name) const override;
     virtual bool setObjectPose(const std::string& object_name, const Pose& pose, bool teleport) override;
 
+    virtual std::vector<float> getBoundingBox(const std::string &actor_name);
+
     //----------- APIs to control ACharacter in scene ----------/
     virtual void charSetFaceExpression(const std::string& expression_name, float value, const std::string& character_name) override;
     virtual float charGetFaceExpression(const std::string& expression_name, const std::string& character_name) const override;

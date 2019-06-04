@@ -6,6 +6,7 @@
 
 #include "common/CommonStructs.hpp"
 
+
 namespace msr { namespace airlib {
 
 
@@ -45,6 +46,8 @@ public:
     virtual std::vector<std::string> listSceneObjects(const std::string& name_regex) const = 0;
     virtual Pose getObjectPose(const std::string& object_name) const = 0;
     virtual bool setObjectPose(const std::string& object_name, const Pose& pose, bool teleport) = 0;
+
+    virtual std::vector<float> getBoundingBox(const std::string& object_name);
 
     //----------- APIs to control ACharacter in scene ----------/
     virtual void charSetFaceExpression(const std::string& expression_name, float value, const std::string& character_name) = 0;

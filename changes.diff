@@ -1,0 +1,1475 @@
+diff --git a/AirLib/include/api/RpcLibClientBase.hpp b/AirLib/include/api/RpcLibClientBase.hpp
+index 11e7e9cd..0afc0941 100644
+--- a/AirLib/include/api/RpcLibClientBase.hpp
++++ b/AirLib/include/api/RpcLibClientBase.hpp
+@@ -52,6 +52,8 @@ public:
+     Pose simGetObjectPose(const std::string& object_name) const;
+     bool simSetObjectPose(const std::string& object_name, const Pose& pose, bool teleport = true);
+     
++    Pose simGetBoundingBox(const std::string& object_name, const std::string& vehicle_name);
++    
+     //task management APIs
+     void cancelLastTask(const std::string& vehicle_name = "");
+     virtual RpcLibClientBase* waitOnLastTask(bool* task_result = nullptr, float timeout_sec = Utils::nan<float>());
+diff --git a/AirLib/include/api/VehicleSimApiBase.hpp b/AirLib/include/api/VehicleSimApiBase.hpp
+index 766b2e69..d8ad0ccd 100644
+--- a/AirLib/include/api/VehicleSimApiBase.hpp
++++ b/AirLib/include/api/VehicleSimApiBase.hpp
+@@ -57,6 +57,8 @@ public:
+     virtual void setPose(const Pose& pose, bool ignore_collision) = 0;
+     virtual const Kinematics::State* getGroundTruthKinematics() const = 0;
+     virtual const msr::airlib::Environment* getGroundTruthEnvironment() const = 0;
++    
++    virtual Pose getBoundingBox(const std::string& object_name, const std::string& vehicle_name) = 0;
+ 
+     virtual CameraInfo getCameraInfo(const std::string& camera_name) const = 0;
+     virtual void setCameraOrientation(const std::string& camera_name, const Quaternionr& orientation) = 0;
+diff --git a/AirLib/src/api/RpcLibClientBase.cpp b/AirLib/src/api/RpcLibClientBase.cpp
+index 0c5cace3..3ec2d9d9 100644
+--- a/AirLib/src/api/RpcLibClientBase.cpp
++++ b/AirLib/src/api/RpcLibClientBase.cpp
+@@ -418,6 +418,10 @@ std::unordered_map<std::string, msr::airlib::Pose> RpcLibClientBase::simGetBoneP
+     return r;
+ }
+ 
++msr::airlib::Pose RpcLibClientBase::simGetBoundingBox(const std::string& object_name, const std::string& vehicle_name)
++{
++    return pimpl_->client.call("simGetBoundingBox", object_name, vehicle_name).as<RpcLibAdapatorsBase::Pose>().to();
++}
+ 
+ }} //namespace
+ 
+diff --git a/AirLib/src/api/RpcLibServerBase.cpp b/AirLib/src/api/RpcLibServerBase.cpp
+index 44f841bd..6264886c 100644
+--- a/AirLib/src/api/RpcLibServerBase.cpp
++++ b/AirLib/src/api/RpcLibServerBase.cpp
+@@ -283,6 +283,10 @@ RpcLibServerBase::RpcLibServerBase(ApiProvider* api_provider, const std::string&
+ 
+         return r;
+     });
++    pimpl_->server.bind("simGetBoundingBox", [&](const std::string& object_name, const std::string& vehicle_name) -> RpcLibAdapatorsBase::Pose {
++        const auto& pose = getVehicleSimApi(vehicle_name)->getBoundingBox(object_name, vehicle_name);
++        return RpcLibAdapatorsBase::Pose(pose);
++    });
+ 
+     //if we don't suppress then server will bomb out for exceptions raised by any method
+     pimpl_->server.suppress_exceptions(true);
+diff --git a/PythonClient/airsim/client.py b/PythonClient/airsim/client.py
+index d7e302dc..706808de 100644
+--- a/PythonClient/airsim/client.py
++++ b/PythonClient/airsim/client.py
+@@ -201,6 +201,10 @@ class VehicleClient:
+     def waitOnLastTask(timeout_sec = float('nan')):
+         return self.client.call('waitOnLastTask', timeout_sec)
+ 
++    def simGetBoundingBox(self, object_name = '', vehicle_name = ''):
++        pose = self.client.call('simGetBoundingBox', object_name, vehicle_name)
++        return Pose.from_msgpack(pose)
++
+     # legacy handling
+     # TODO: remove below legacy wrappers in future major releases
+     upgrade_api_help = "\nPlease see https://github.com/Microsoft/AirSim/blob/master/docs/upgrade_apis.md for more info."
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/.gitignore b/Unreal/Environments/Blocks 4.18 - 2/.gitignore
+new file mode 100644
+index 00000000..0c04c959
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/.gitignore	
+@@ -0,0 +1,18 @@
++# don't check-in Plugins folder we copied from AirSim folder
++Plugins/
++
++# don't check-in generated files
++*.sln
++*_BuiltData.uasset
++/.kdev/
++/*.kdev4
++/*.pro
++/*.workspace
++/*CodeCompletionFolders.txt
++/*CodeLitePreProcessor.txt
++/*.pri
++/CMakeLists.txt
++/Makefile
++
++# avoid checking uproject because this is usually just version change
++*.uproject
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditor.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditor.ini
+new file mode 100644
+index 00000000..d4e8232a
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditor.ini	
+@@ -0,0 +1,10 @@
++[UnrealEd.SimpleMap]
++SimpleMapName=/Game/Flying/Maps/FlyingExampleMap
++
++[EditoronlyBP]
++bAllowClassAndBlueprintPinMatching=true
++bReplaceBlueprintWithClass= true
++bDontLoadBlueprintOutsideEditor= true
++bBlueprintIsNotBlueprintType= true
++
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditorPerProjectUserSettings.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditorPerProjectUserSettings.ini
+new file mode 100644
+index 00000000..e15e1cff
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEditorPerProjectUserSettings.ini	
+@@ -0,0 +1,5 @@
++[ContentBrowser]
++ContentBrowserTab1.SelectedPaths=/Game/Flying
++
++[/Script/UnrealEd.EditorPerProjectUserSettings]
++bThrottleCPUWhenNotForeground=False
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEngine.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEngine.ini
+new file mode 100644
+index 00000000..14ff4fd8
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultEngine.ini	
+@@ -0,0 +1,71 @@
++[/Script/EngineSettings.GameMapsSettings]
++EditorStartupMap=/Game/FlyingCPP/Maps/FlyingExampleMap
++LocalMapOptions=
++TransitionMap=
++bUseSplitscreen=True
++TwoPlayerSplitscreenLayout=Horizontal
++ThreePlayerSplitscreenLayout=FavorTop
++GameInstanceClass=/Script/Engine.GameInstance
++GameDefaultMap=/Game/FlyingCPP/Maps/FlyingExampleMap
++ServerDefaultMap=/Engine/Maps/Entry
++GlobalDefaultGameMode=/Script/Blocks.BlocksGameMode
++GlobalDefaultServerGameMode=None
++
++[/Script/IOSRuntimeSettings.IOSRuntimeSettings]
++MinimumiOSVersion=IOS_8
++
++
++[/Script/Engine.Engine]
+++ActiveGameNameRedirects=(OldGameName="TP_Flying",NewGameName="/Script/Blocks")
+++ActiveGameNameRedirects=(OldGameName="/Script/TP_Flying",NewGameName="/Script/Blocks")
+++ActiveClassRedirects=(OldClassName="TP_FlyingPawn",NewClassName="BlocksPawn")
+++ActiveClassRedirects=(OldClassName="TP_FlyingGameMode",NewClassName="BlocksGameMode")
++
++[/Script/HardwareTargeting.HardwareTargetingSettings]
++TargetedHardwareClass=Desktop
++AppliedTargetedHardwareClass=Desktop
++DefaultGraphicsPerformance=Maximum
++AppliedDefaultGraphicsPerformance=Maximum
++
++[/Script/Engine.PhysicsSettings]
++DefaultGravityZ=-980.000000
++DefaultTerminalVelocity=4000.000000
++DefaultFluidFriction=0.300000
++SimulateScratchMemorySize=262144
++RagdollAggregateThreshold=4
++TriangleMeshTriangleMinAreaThreshold=5.000000
++bEnableAsyncScene=False
++bEnableShapeSharing=False
++bEnablePCM=False
++bEnableStabilization=False
++bWarnMissingLocks=True
++bEnable2DPhysics=False
++LockedAxis=Invalid
++DefaultDegreesOfFreedom=Full3D
++BounceThresholdVelocity=200.000000
++FrictionCombineMode=Average
++RestitutionCombineMode=Average
++MaxAngularVelocity=3600.000000
++MaxDepenetrationVelocity=0.000000
++ContactOffsetMultiplier=0.010000
++MinContactOffset=0.000100
++MaxContactOffset=1.000000
++bSimulateSkeletalMeshOnDedicatedServer=True
++DefaultShapeComplexity=CTF_UseSimpleAndComplex
++bDefaultHasComplexCollision=True
++bSuppressFaceRemapTable=False
++bSupportUVFromHitResults=False
++bDisableActiveActors=False
++bDisableCCD=False
++bEnableEnhancedDeterminism=False
++MaxPhysicsDeltaTime=0.033333
++bSubstepping=False
++bSubsteppingAsync=False
++MaxSubstepDeltaTime=0.016667
++MaxSubsteps=6
++SyncSceneSmoothingFactor=0.000000
++AsyncSceneSmoothingFactor=0.990000
++InitialAverageFrameRate=0.016667
++PhysXTreeRebuildRate=10
++
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGame.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGame.ini
+new file mode 100644
+index 00000000..78da5135
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGame.ini	
+@@ -0,0 +1,47 @@
++[/Script/EngineSettings.GeneralProjectSettings]
++ProjectID=367FFC384956CDC4377673B3217F380D
++ProjectName="Blocks"
++CompanyName=Microsoft Research
++Homepage="https://github.com/microsoft/airsim"
++SupportContact="https://github.com/microsoft/airsim/issues"
++LicensingTerms=MIT Licence
++ProjectDisplayedTitle=NSLOCTEXT("[/Script/EngineSettings]", "8F8B6B2A472F9FDFB69E2B8CFAE8C4E0", "Blocks Environment for AirSim")
++ProjectDebugTitleInfo=NSLOCTEXT("[/Script/EngineSettings]", "F31D7C524A9E9BC66DD2AA922D309408", "Blocks Environment for AirSim")
++
++[/Script/UnrealEd.ProjectPackagingSettings]
++Build=IfProjectHasCode
++BuildConfiguration=PPBC_Development
++StagingDirectory=(Path="C:/temp")
++FullRebuild=True
++ForDistribution=False
++IncludeDebugFiles=False
++BlueprintNativizationMethod=Disabled
++bIncludeNativizedAssetsInProjectGeneration=False
++UsePakFile=True
++bGenerateChunks=False
++bGenerateNoChunks=False
++bChunkHardReferencesOnly=False
++bBuildHttpChunkInstallData=False
++HttpChunkInstallDataDirectory=(Path="")
++HttpChunkInstallDataVersion=
++IncludePrerequisites=True
++IncludeAppLocalPrerequisites=False
++bShareMaterialShaderCode=True
++bSharedMaterialNativeLibraries=True
++ApplocalPrerequisitesDirectory=(Path="")
++IncludeCrashReporter=False
++InternationalizationPreset=English
++-CulturesToStage=en
+++CulturesToStage=en
++bCookAll=False
++bCookMapsOnly=False
++bCompressed=True
++bEncryptIniFiles=False
++bEncryptPakIndex=False
++bSkipEditorContent=False
+++MapsToCook=(FilePath="/Game/FlyingCPP/Maps/FlyingExampleMap")
+++MapsToCook=(FilePath="/Game/AirSimAssets")
++bNativizeBlueprintAssets=False
++bNativizeOnlySelectedBlueprints=False
++
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGameUserSettings.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGameUserSettings.ini
+new file mode 100644
+index 00000000..87f51567
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultGameUserSettings.ini	
+@@ -0,0 +1,2 @@
++[/Script/Engine.GameUserSettings]
++FullscreenMode=1
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultInput.ini b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultInput.ini
+new file mode 100644
+index 00000000..78803ce4
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Config/DefaultInput.ini	
+@@ -0,0 +1,20 @@
++[/Script/Engine.InputSettings]
++bAltEnterTogglesFullscreen=True
++bF11TogglesFullscreen=True
++bUseMouseForTouch=False
++bEnableMouseSmoothing=True
++bEnableFOVScaling=True
++FOVScale=0.011110
++DoubleClickTime=0.200000
++bCaptureMouseOnLaunch=False
++DefaultViewportMouseCaptureMode=NoCapture
++bDefaultViewportMouseLock=False
++DefaultViewportMouseLockMode=DoNotLock
++bAlwaysShowTouchInterface=False
++bShowConsoleOnFourFingerTap=True
++DefaultTouchInterface=/Engine/MobileResources/HUD/DefaultVirtualJoysticks.DefaultVirtualJoysticks
++ConsoleKey=None
++-ConsoleKeys=Tilde
+++ConsoleKeys=Tilde
++
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/AirSimAssets.umap b/Unreal/Environments/Blocks 4.18 - 2/Content/AirSimAssets.umap
+new file mode 100644
+index 00000000..832307ab
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/AirSimAssets.umap differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/BaseMaterial.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/BaseMaterial.uasset
+new file mode 100644
+index 00000000..9e46c78b
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/BaseMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/GrayMaterial.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/GrayMaterial.uasset
+new file mode 100644
+index 00000000..ce3d61a6
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Flying/Meshes/GrayMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/FlyingCPP/Maps/FlyingExampleMap.umap b/Unreal/Environments/Blocks 4.18 - 2/Content/FlyingCPP/Maps/FlyingExampleMap.umap
+new file mode 100644
+index 00000000..f2d10657
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/FlyingCPP/Maps/FlyingExampleMap.umap differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube.uasset
+new file mode 100644
+index 00000000..a2aff598
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset
+new file mode 100644
+index 00000000..cb1abf93
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/CubeMaterial.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/CubeMaterial.uasset
+new file mode 100644
+index 00000000..6960a696
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/CubeMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/TemplateFloor.uasset b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/TemplateFloor.uasset
+new file mode 100644
+index 00000000..be4c8e0e
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18 - 2/Content/Geometry/Meshes/TemplateFloor.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.bat b/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.bat
+new file mode 100644
+index 00000000..0d1e7107
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.bat	
+@@ -0,0 +1,11 @@
++setlocal
++del /q gen_temp.txt
++powershell -command "& { (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\Unreal.ProjectFile\shell\rungenproj' -Name 'Icon' ).'Icon' } > gen_temp.tmp"
++type gen_temp.tmp > gen_temp.txt
++set /p gen_bin=<gen_temp.txt
++del /q gen_temp.tmp
++del /q gen_temp.txt
++for %%f in (*.uproject) do (
++		echo Generating files for %%f
++		%gen_bin% /projectfiles "%cd%\%%f"
++)
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.sh b/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.sh
+new file mode 100644
+index 00000000..8617ede3
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/GenerateProjectFiles.sh	
+@@ -0,0 +1,27 @@
++#!/bin/bash
++
++set -x
++set -e
++
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++UnrealDir=$1
++if [[ ! -e "$UnrealDir" ]]; then
++    # UnrealDir variable must be set like '/Users/Shared/Epic\ Games/UE_4.16'
++    echo "UnrealDir is not set."
++    exit 1
++fi
++
++if [ "$(uname)" == "Darwin" ]; then
++    # Call UnrealEngine shell scrpit
++    pushd "$UnrealDir/Engine/Build/BatchFiles/Mac/" >/dev/null
++    ./GenerateProjectFiles.sh "$SCRIPT_DIR/Blocks.uproject"
++    popd >/dev/null
++else
++    echo "Not implemented"
++    exit 1
++fi
++
++popd >/dev/null
++set +x
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.4.15.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.4.15.cs
+new file mode 100644
+index 00000000..3d56c396
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.4.15.cs	
+@@ -0,0 +1,25 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksTarget : TargetRules
++{
++	public BlocksTarget(TargetInfo Target)
++	{
++		Type = TargetType.Game;
++	}
++
++	//
++	// TargetRules interface.
++	//
++
++	public override void SetupBinaries(
++		TargetInfo Target,
++		ref List<UEBuildBinaryConfiguration> OutBuildBinaryConfigurations,
++		ref List<string> OutExtraModuleNames
++		)
++	{
++		OutExtraModuleNames.Add("Blocks");
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.cs
+new file mode 100644
+index 00000000..d7c26bac
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks.Target.cs	
+@@ -0,0 +1,17 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksTarget : TargetRules
++{
++	public BlocksTarget(TargetInfo Target) : base(Target)
++	{
++		Type = TargetType.Game;
++		ExtraModuleNames.AddRange(new string[] { "Blocks" });
++
++		//bUseUnityBuild = false;
++		if (Target.Platform == UnrealTargetPlatform.Linux)
++			bUsePCHFiles = false;
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.4.15.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.4.15.cs
+new file mode 100644
+index 00000000..5852ecc5
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.4.15.cs	
+@@ -0,0 +1,11 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++
++public class Blocks : ModuleRules
++{
++	public Blocks(TargetInfo Target)
++	{
++		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.cs
+new file mode 100644
+index 00000000..46aba284
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.Build.cs	
+@@ -0,0 +1,15 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++
++public class Blocks : ModuleRules
++{
++    public Blocks(ReadOnlyTargetRules Target) : base(Target)
++    {
++        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
++        bEnableExceptions = true; // win64
++        if (Target.Platform == UnrealTargetPlatform.Linux)
++            bEnableExceptions = false;
++        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
++    }
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.cpp b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.cpp
+new file mode 100644
+index 00000000..2ced72d3
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.cpp	
+@@ -0,0 +1,10 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++#include "Blocks.h"
++
++#include "Modules/ModuleManager.h"
++
++IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, Blocks, "Blocks");
++
++
++ 
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.h b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.h
+new file mode 100644
+index 00000000..8019a96a
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/Blocks/Blocks.h	
+@@ -0,0 +1,6 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++#pragma once
++
++#include "CoreMinimal.h"
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.4.15.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.4.15.cs
+new file mode 100644
+index 00000000..184e12de
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.4.15.cs	
+@@ -0,0 +1,25 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksEditorTarget : TargetRules
++{
++	public BlocksEditorTarget(TargetInfo Target)
++	{
++		Type = TargetType.Editor;
++	}
++
++	//
++	// TargetRules interface.
++	//
++
++	public override void SetupBinaries(
++		TargetInfo Target,
++		ref List<UEBuildBinaryConfiguration> OutBuildBinaryConfigurations,
++		ref List<string> OutExtraModuleNames
++		)
++	{
++		OutExtraModuleNames.Add("Blocks");
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.cs b/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.cs
+new file mode 100644
+index 00000000..4ec09ba1
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/Source/BlocksEditor.Target.cs	
+@@ -0,0 +1,16 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksEditorTarget : TargetRules
++{
++	public BlocksEditorTarget(TargetInfo Target) : base(Target)
++	{
++		Type = TargetType.Editor;
++		ExtraModuleNames.AddRange(new string[] { "Blocks" });
++
++        //bUseUnityBuild = false;
++        //bUsePCHFiles = false;
++    }
++}
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/clean.bat b/Unreal/Environments/Blocks 4.18 - 2/clean.bat
+new file mode 100644
+index 00000000..86487d1e
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/clean.bat	
+@@ -0,0 +1,10 @@
++rd /s/q Build
++rd /s/q Binaries
++rd /s/q Intermediate
++rd /s/q Saved
++mkdir Saved\logs
++rd /s/q Plugins\AirSim\Binaries
++rd /s/q Plugins\AirSim\Intermediate
++rd /s/q Plugins\AirSim\Saved
++del *.sln
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/clean.sh b/Unreal/Environments/Blocks 4.18 - 2/clean.sh
+new file mode 100644
+index 00000000..941171fa
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/clean.sh	
+@@ -0,0 +1,20 @@
++#! /bin/bash
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++# clean temporary unreal folders
++rm -rf Binaries
++rm -rf Intermediate
++rm -rf Saved
++rm -rf Plugins/AirSim/Binaries
++rm -rf Plugins/AirSim/Intermediate
++rm -rf Plugins/AirSim/Saved
++rm -f CMakeLists.txt
++rm -f Makefile
++
++popd >/dev/null
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/package.bat b/Unreal/Environments/Blocks 4.18 - 2/package.bat
+new file mode 100644
+index 00000000..80f53ac6
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/package.bat	
+@@ -0,0 +1,64 @@
++@echo off
++REM //---------- set up variable ----------
++setlocal
++set ROOT_DIR=%~dp0
++
++set OutPath=%1
++set ToolPath=%2
++set UEVer=%3
++
++if "%UEVer%"=="" set "UEVer=4.18"
++
++set "_ToolPath=%PROGRAMFILES%\Epic Games\UE_%UEVer%\Engine\Build\BatchFiles"
++if "%ToolPath%"=="" set ToolPath=%_ToolPath%
++if "%ToolPath%"=="""" set ToolPath=%_ToolPath%
++
++IF NOT EXIST "%ToolPath%" (
++	echo "Unreal Engine build path %ToolPath% was not found"
++	goto :failed
++)
++
++if "%OutPath%"=="" set "OutPath=D:\AirSimBuilds"
++IF NOT EXIST "%ToolPath%" (
++	echo "Package output path %OutPath% was not found"
++	goto :failed
++)
++
++echo Using ToolPath = %ToolPath%
++echo Using OutPath = %OutPath%
++
++for %%f in (*.uproject) do (
++		echo Packaging: %%f
++		
++		"%ToolPath%\Build" "%%~nfEditor" Win64 Development -WarningsAsErrors "%cd%\%%f"
++		if ERRORLEVEL 1 goto :failed
++		
++		REM "%ToolPath%\RunUAT" -ScriptsForProject="%cd%\%%f" BuildCookRun -installed -nop4 -project="%cd%\%%f" -cook -stage -archive -archivedirectory="%OutPath%" -package -clientconfig=Development -ue4exe=UE4Editor-Cmd.exe -compressed -pak -prereqs -nodebuginfo -targetplatform=Win64 -build -utf8output -nocompile -nocompileeditor 
++		
++		REM "%ToolPath%\RunUAT" BuildCookRun -project="%cd%\%%f" -noP4 -platform=Win64 -clientconfig=Development -serverconfig=Development -cook -rocket -allmaps -build -stage -NoCompile -nocompileeditor -pak -archive -archivedirectory="%OutPath%"
++		
++		rmdir /s /q "%OutPath%\%%~nf"
++		
++		"%ToolPath%\RunUAT" BuildCookRun -project="%cd%\%%f" -noP4 -platform=Win64 -clientconfig=Development -cook -build -stage -pak -archive -archivedirectory="%OutPath%"  -utf8output -compressed -prereqs
++		if ERRORLEVEL 1 goto :failed
++		
++		move "%OutPath%\WindowsNoEditor" "%OutPath%\%%~nf"
++		if ERRORLEVEL 1 goto :failed
++		
++		@echo off
++		echo start %%~nf -windowed> "%OutPath%\%%~nf\run.bat"
++		if ERRORLEVEL 1 goto :failed
++)
++
++goto :done
++
++:failed
++echo "Error occured while packaging"
++echo "Usage: package.bat <path\to\output> <path to Engine\Build\BatchFiles> <UE Version>"
++exit /b 1
++
++:done
++if "%1"=="" pause
++
++	
++
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/update_from_git.bat b/Unreal/Environments/Blocks 4.18 - 2/update_from_git.bat
+new file mode 100644
+index 00000000..9d865403
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/update_from_git.bat	
+@@ -0,0 +1,34 @@
++@echo off
++REM //---------- set up variable ----------
++setlocal
++set ROOT_DIR=%~dp0
++
++set AirSimPath=%1
++
++REM default path works for Blocks environment
++if "%AirSimPath%"=="" set "AirSimPath=..\..\.."
++
++IF NOT EXIST "%AirSimPath%" (
++	echo "AirSimPath %AirSimPath% was not found"
++	goto :failed
++)
++
++echo Using AirSimPath = %AirSimPath%
++
++robocopy /MIR "%AirSimPath%\Unreal\Plugins\AirSim" Plugins\AirSim /XD temp *. /njh /njs /ndl /np
++robocopy /MIR "%AirSimPath%\AirLib" Plugins\AirSim\Source\AirLib /XD temp *. /njh /njs /ndl /np
++robocopy  /njh /njs /ndl /np "%AirSimPath%\Unreal\Environments\Blocks" "." *.bat 
++robocopy  /njh /njs /ndl /np "%AirSimPath%\Unreal\Environments\Blocks" "." *.sh  
++rem robocopy /njh /njs /ndl /np "%AirSimPath%" "." *.gitignore
++
++cmd /c clean.bat
++cmd /c GenerateProjectFiles.bat
++
++goto :done
++
++:failed
++echo Error occured while updating.
++exit /b 1
++
++:done
++if "%1"=="" pause
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/update_from_git.sh b/Unreal/Environments/Blocks 4.18 - 2/update_from_git.sh
+new file mode 100644
+index 00000000..5ffd1a0c
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/update_from_git.sh	
+@@ -0,0 +1,15 @@
++#! /bin/bash
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++./clean.sh
++
++rsync -a  --exclude 'temp' --delete ../../Plugins/AirSim Plugins/
++rsync -a  --exclude 'temp' --delete ../../../AirLib Plugins/AirSim/Source/
++
++popd >/dev/null
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/update_to_git.bat b/Unreal/Environments/Blocks 4.18 - 2/update_to_git.bat
+new file mode 100644
+index 00000000..03995431
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/update_to_git.bat	
+@@ -0,0 +1,3 @@
++robocopy /MIR Plugins\AirSim ..\..\Plugins\AirSim /XD temp Intermediate Binaries Saved *. /njh /njs /ndl /np
++robocopy /MIR Plugins\AirSim\Source\AirLib ..\..\..\AirLib /XD temp Intermediate Binaries Saved *. /njh /njs /ndl /np
++pause
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18 - 2/update_to_git.sh b/Unreal/Environments/Blocks 4.18 - 2/update_to_git.sh
+new file mode 100644
+index 00000000..a1bcb0ed
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18 - 2/update_to_git.sh	
+@@ -0,0 +1,15 @@
++#! /bin/bash
++
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++rsync -a  --exclude 'temp' --delete Plugins/AirSim ../../Plugins/
++rsync -a  --exclude 'temp' --delete Plugins/AirSim/Source/AirLib ../../../
++
++popd >/dev/null
++set +x
+diff --git a/Unreal/Environments/Blocks 4.18/.gitignore b/Unreal/Environments/Blocks 4.18/.gitignore
+new file mode 100644
+index 00000000..0c04c959
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/.gitignore	
+@@ -0,0 +1,18 @@
++# don't check-in Plugins folder we copied from AirSim folder
++Plugins/
++
++# don't check-in generated files
++*.sln
++*_BuiltData.uasset
++/.kdev/
++/*.kdev4
++/*.pro
++/*.workspace
++/*CodeCompletionFolders.txt
++/*CodeLitePreProcessor.txt
++/*.pri
++/CMakeLists.txt
++/Makefile
++
++# avoid checking uproject because this is usually just version change
++*.uproject
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultEditor.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultEditor.ini
+new file mode 100644
+index 00000000..d4e8232a
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultEditor.ini	
+@@ -0,0 +1,10 @@
++[UnrealEd.SimpleMap]
++SimpleMapName=/Game/Flying/Maps/FlyingExampleMap
++
++[EditoronlyBP]
++bAllowClassAndBlueprintPinMatching=true
++bReplaceBlueprintWithClass= true
++bDontLoadBlueprintOutsideEditor= true
++bBlueprintIsNotBlueprintType= true
++
++
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultEditorPerProjectUserSettings.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultEditorPerProjectUserSettings.ini
+new file mode 100644
+index 00000000..e15e1cff
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultEditorPerProjectUserSettings.ini	
+@@ -0,0 +1,5 @@
++[ContentBrowser]
++ContentBrowserTab1.SelectedPaths=/Game/Flying
++
++[/Script/UnrealEd.EditorPerProjectUserSettings]
++bThrottleCPUWhenNotForeground=False
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultEngine.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultEngine.ini
+new file mode 100644
+index 00000000..14ff4fd8
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultEngine.ini	
+@@ -0,0 +1,71 @@
++[/Script/EngineSettings.GameMapsSettings]
++EditorStartupMap=/Game/FlyingCPP/Maps/FlyingExampleMap
++LocalMapOptions=
++TransitionMap=
++bUseSplitscreen=True
++TwoPlayerSplitscreenLayout=Horizontal
++ThreePlayerSplitscreenLayout=FavorTop
++GameInstanceClass=/Script/Engine.GameInstance
++GameDefaultMap=/Game/FlyingCPP/Maps/FlyingExampleMap
++ServerDefaultMap=/Engine/Maps/Entry
++GlobalDefaultGameMode=/Script/Blocks.BlocksGameMode
++GlobalDefaultServerGameMode=None
++
++[/Script/IOSRuntimeSettings.IOSRuntimeSettings]
++MinimumiOSVersion=IOS_8
++
++
++[/Script/Engine.Engine]
+++ActiveGameNameRedirects=(OldGameName="TP_Flying",NewGameName="/Script/Blocks")
+++ActiveGameNameRedirects=(OldGameName="/Script/TP_Flying",NewGameName="/Script/Blocks")
+++ActiveClassRedirects=(OldClassName="TP_FlyingPawn",NewClassName="BlocksPawn")
+++ActiveClassRedirects=(OldClassName="TP_FlyingGameMode",NewClassName="BlocksGameMode")
++
++[/Script/HardwareTargeting.HardwareTargetingSettings]
++TargetedHardwareClass=Desktop
++AppliedTargetedHardwareClass=Desktop
++DefaultGraphicsPerformance=Maximum
++AppliedDefaultGraphicsPerformance=Maximum
++
++[/Script/Engine.PhysicsSettings]
++DefaultGravityZ=-980.000000
++DefaultTerminalVelocity=4000.000000
++DefaultFluidFriction=0.300000
++SimulateScratchMemorySize=262144
++RagdollAggregateThreshold=4
++TriangleMeshTriangleMinAreaThreshold=5.000000
++bEnableAsyncScene=False
++bEnableShapeSharing=False
++bEnablePCM=False
++bEnableStabilization=False
++bWarnMissingLocks=True
++bEnable2DPhysics=False
++LockedAxis=Invalid
++DefaultDegreesOfFreedom=Full3D
++BounceThresholdVelocity=200.000000
++FrictionCombineMode=Average
++RestitutionCombineMode=Average
++MaxAngularVelocity=3600.000000
++MaxDepenetrationVelocity=0.000000
++ContactOffsetMultiplier=0.010000
++MinContactOffset=0.000100
++MaxContactOffset=1.000000
++bSimulateSkeletalMeshOnDedicatedServer=True
++DefaultShapeComplexity=CTF_UseSimpleAndComplex
++bDefaultHasComplexCollision=True
++bSuppressFaceRemapTable=False
++bSupportUVFromHitResults=False
++bDisableActiveActors=False
++bDisableCCD=False
++bEnableEnhancedDeterminism=False
++MaxPhysicsDeltaTime=0.033333
++bSubstepping=False
++bSubsteppingAsync=False
++MaxSubstepDeltaTime=0.016667
++MaxSubsteps=6
++SyncSceneSmoothingFactor=0.000000
++AsyncSceneSmoothingFactor=0.990000
++InitialAverageFrameRate=0.016667
++PhysXTreeRebuildRate=10
++
++
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultGame.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultGame.ini
+new file mode 100644
+index 00000000..78da5135
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultGame.ini	
+@@ -0,0 +1,47 @@
++[/Script/EngineSettings.GeneralProjectSettings]
++ProjectID=367FFC384956CDC4377673B3217F380D
++ProjectName="Blocks"
++CompanyName=Microsoft Research
++Homepage="https://github.com/microsoft/airsim"
++SupportContact="https://github.com/microsoft/airsim/issues"
++LicensingTerms=MIT Licence
++ProjectDisplayedTitle=NSLOCTEXT("[/Script/EngineSettings]", "8F8B6B2A472F9FDFB69E2B8CFAE8C4E0", "Blocks Environment for AirSim")
++ProjectDebugTitleInfo=NSLOCTEXT("[/Script/EngineSettings]", "F31D7C524A9E9BC66DD2AA922D309408", "Blocks Environment for AirSim")
++
++[/Script/UnrealEd.ProjectPackagingSettings]
++Build=IfProjectHasCode
++BuildConfiguration=PPBC_Development
++StagingDirectory=(Path="C:/temp")
++FullRebuild=True
++ForDistribution=False
++IncludeDebugFiles=False
++BlueprintNativizationMethod=Disabled
++bIncludeNativizedAssetsInProjectGeneration=False
++UsePakFile=True
++bGenerateChunks=False
++bGenerateNoChunks=False
++bChunkHardReferencesOnly=False
++bBuildHttpChunkInstallData=False
++HttpChunkInstallDataDirectory=(Path="")
++HttpChunkInstallDataVersion=
++IncludePrerequisites=True
++IncludeAppLocalPrerequisites=False
++bShareMaterialShaderCode=True
++bSharedMaterialNativeLibraries=True
++ApplocalPrerequisitesDirectory=(Path="")
++IncludeCrashReporter=False
++InternationalizationPreset=English
++-CulturesToStage=en
+++CulturesToStage=en
++bCookAll=False
++bCookMapsOnly=False
++bCompressed=True
++bEncryptIniFiles=False
++bEncryptPakIndex=False
++bSkipEditorContent=False
+++MapsToCook=(FilePath="/Game/FlyingCPP/Maps/FlyingExampleMap")
+++MapsToCook=(FilePath="/Game/AirSimAssets")
++bNativizeBlueprintAssets=False
++bNativizeOnlySelectedBlueprints=False
++
++
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultGameUserSettings.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultGameUserSettings.ini
+new file mode 100644
+index 00000000..87f51567
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultGameUserSettings.ini	
+@@ -0,0 +1,2 @@
++[/Script/Engine.GameUserSettings]
++FullscreenMode=1
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/Config/DefaultInput.ini b/Unreal/Environments/Blocks 4.18/Config/DefaultInput.ini
+new file mode 100644
+index 00000000..78803ce4
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Config/DefaultInput.ini	
+@@ -0,0 +1,20 @@
++[/Script/Engine.InputSettings]
++bAltEnterTogglesFullscreen=True
++bF11TogglesFullscreen=True
++bUseMouseForTouch=False
++bEnableMouseSmoothing=True
++bEnableFOVScaling=True
++FOVScale=0.011110
++DoubleClickTime=0.200000
++bCaptureMouseOnLaunch=False
++DefaultViewportMouseCaptureMode=NoCapture
++bDefaultViewportMouseLock=False
++DefaultViewportMouseLockMode=DoNotLock
++bAlwaysShowTouchInterface=False
++bShowConsoleOnFourFingerTap=True
++DefaultTouchInterface=/Engine/MobileResources/HUD/DefaultVirtualJoysticks.DefaultVirtualJoysticks
++ConsoleKey=None
++-ConsoleKeys=Tilde
+++ConsoleKeys=Tilde
++
++
+diff --git a/Unreal/Environments/Blocks 4.18/Content/AirSimAssets.umap b/Unreal/Environments/Blocks 4.18/Content/AirSimAssets.umap
+new file mode 100644
+index 00000000..832307ab
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/AirSimAssets.umap differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/BaseMaterial.uasset b/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/BaseMaterial.uasset
+new file mode 100644
+index 00000000..9e46c78b
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/BaseMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/GrayMaterial.uasset b/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/GrayMaterial.uasset
+new file mode 100644
+index 00000000..ce3d61a6
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Flying/Meshes/GrayMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/FlyingCPP/Maps/FlyingExampleMap.umap b/Unreal/Environments/Blocks 4.18/Content/FlyingCPP/Maps/FlyingExampleMap.umap
+new file mode 100644
+index 00000000..f2d10657
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/FlyingCPP/Maps/FlyingExampleMap.umap differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube.uasset b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube.uasset
+new file mode 100644
+index 00000000..a2aff598
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset
+new file mode 100644
+index 00000000..cb1abf93
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/1M_Cube_Chamfer.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/CubeMaterial.uasset b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/CubeMaterial.uasset
+new file mode 100644
+index 00000000..6960a696
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/CubeMaterial.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/TemplateFloor.uasset b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/TemplateFloor.uasset
+new file mode 100644
+index 00000000..be4c8e0e
+Binary files /dev/null and b/Unreal/Environments/Blocks 4.18/Content/Geometry/Meshes/TemplateFloor.uasset differ
+diff --git a/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.bat b/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.bat
+new file mode 100644
+index 00000000..0d1e7107
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.bat	
+@@ -0,0 +1,11 @@
++setlocal
++del /q gen_temp.txt
++powershell -command "& { (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\Unreal.ProjectFile\shell\rungenproj' -Name 'Icon' ).'Icon' } > gen_temp.tmp"
++type gen_temp.tmp > gen_temp.txt
++set /p gen_bin=<gen_temp.txt
++del /q gen_temp.tmp
++del /q gen_temp.txt
++for %%f in (*.uproject) do (
++		echo Generating files for %%f
++		%gen_bin% /projectfiles "%cd%\%%f"
++)
+diff --git a/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.sh b/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.sh
+new file mode 100644
+index 00000000..8617ede3
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/GenerateProjectFiles.sh	
+@@ -0,0 +1,27 @@
++#!/bin/bash
++
++set -x
++set -e
++
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++UnrealDir=$1
++if [[ ! -e "$UnrealDir" ]]; then
++    # UnrealDir variable must be set like '/Users/Shared/Epic\ Games/UE_4.16'
++    echo "UnrealDir is not set."
++    exit 1
++fi
++
++if [ "$(uname)" == "Darwin" ]; then
++    # Call UnrealEngine shell scrpit
++    pushd "$UnrealDir/Engine/Build/BatchFiles/Mac/" >/dev/null
++    ./GenerateProjectFiles.sh "$SCRIPT_DIR/Blocks.uproject"
++    popd >/dev/null
++else
++    echo "Not implemented"
++    exit 1
++fi
++
++popd >/dev/null
++set +x
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.4.15.cs b/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.4.15.cs
+new file mode 100644
+index 00000000..3d56c396
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.4.15.cs	
+@@ -0,0 +1,25 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksTarget : TargetRules
++{
++	public BlocksTarget(TargetInfo Target)
++	{
++		Type = TargetType.Game;
++	}
++
++	//
++	// TargetRules interface.
++	//
++
++	public override void SetupBinaries(
++		TargetInfo Target,
++		ref List<UEBuildBinaryConfiguration> OutBuildBinaryConfigurations,
++		ref List<string> OutExtraModuleNames
++		)
++	{
++		OutExtraModuleNames.Add("Blocks");
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.cs b/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.cs
+new file mode 100644
+index 00000000..d7c26bac
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks.Target.cs	
+@@ -0,0 +1,17 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksTarget : TargetRules
++{
++	public BlocksTarget(TargetInfo Target) : base(Target)
++	{
++		Type = TargetType.Game;
++		ExtraModuleNames.AddRange(new string[] { "Blocks" });
++
++		//bUseUnityBuild = false;
++		if (Target.Platform == UnrealTargetPlatform.Linux)
++			bUsePCHFiles = false;
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.4.15.cs b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.4.15.cs
+new file mode 100644
+index 00000000..5852ecc5
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.4.15.cs	
+@@ -0,0 +1,11 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++
++public class Blocks : ModuleRules
++{
++	public Blocks(TargetInfo Target)
++	{
++		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.cs b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.cs
+new file mode 100644
+index 00000000..46aba284
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.Build.cs	
+@@ -0,0 +1,15 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++
++public class Blocks : ModuleRules
++{
++    public Blocks(ReadOnlyTargetRules Target) : base(Target)
++    {
++        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
++        bEnableExceptions = true; // win64
++        if (Target.Platform == UnrealTargetPlatform.Linux)
++            bEnableExceptions = false;
++        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
++    }
++}
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.cpp b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.cpp
+new file mode 100644
+index 00000000..2ced72d3
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.cpp	
+@@ -0,0 +1,10 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++#include "Blocks.h"
++
++#include "Modules/ModuleManager.h"
++
++IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, Blocks, "Blocks");
++
++
++ 
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.h b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.h
+new file mode 100644
+index 00000000..8019a96a
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/Blocks/Blocks.h	
+@@ -0,0 +1,6 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++#pragma once
++
++#include "CoreMinimal.h"
++
+diff --git a/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.4.15.cs b/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.4.15.cs
+new file mode 100644
+index 00000000..184e12de
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.4.15.cs	
+@@ -0,0 +1,25 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksEditorTarget : TargetRules
++{
++	public BlocksEditorTarget(TargetInfo Target)
++	{
++		Type = TargetType.Editor;
++	}
++
++	//
++	// TargetRules interface.
++	//
++
++	public override void SetupBinaries(
++		TargetInfo Target,
++		ref List<UEBuildBinaryConfiguration> OutBuildBinaryConfigurations,
++		ref List<string> OutExtraModuleNames
++		)
++	{
++		OutExtraModuleNames.Add("Blocks");
++	}
++}
+diff --git a/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.cs b/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.cs
+new file mode 100644
+index 00000000..4ec09ba1
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/Source/BlocksEditor.Target.cs	
+@@ -0,0 +1,16 @@
++// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
++
++using UnrealBuildTool;
++using System.Collections.Generic;
++
++public class BlocksEditorTarget : TargetRules
++{
++	public BlocksEditorTarget(TargetInfo Target) : base(Target)
++	{
++		Type = TargetType.Editor;
++		ExtraModuleNames.AddRange(new string[] { "Blocks" });
++
++        //bUseUnityBuild = false;
++        //bUsePCHFiles = false;
++    }
++}
+diff --git a/Unreal/Environments/Blocks 4.18/clean.bat b/Unreal/Environments/Blocks 4.18/clean.bat
+new file mode 100644
+index 00000000..86487d1e
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/clean.bat	
+@@ -0,0 +1,10 @@
++rd /s/q Build
++rd /s/q Binaries
++rd /s/q Intermediate
++rd /s/q Saved
++mkdir Saved\logs
++rd /s/q Plugins\AirSim\Binaries
++rd /s/q Plugins\AirSim\Intermediate
++rd /s/q Plugins\AirSim\Saved
++del *.sln
++
+diff --git a/Unreal/Environments/Blocks 4.18/clean.sh b/Unreal/Environments/Blocks 4.18/clean.sh
+new file mode 100644
+index 00000000..941171fa
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/clean.sh	
+@@ -0,0 +1,20 @@
++#! /bin/bash
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++# clean temporary unreal folders
++rm -rf Binaries
++rm -rf Intermediate
++rm -rf Saved
++rm -rf Plugins/AirSim/Binaries
++rm -rf Plugins/AirSim/Intermediate
++rm -rf Plugins/AirSim/Saved
++rm -f CMakeLists.txt
++rm -f Makefile
++
++popd >/dev/null
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/package.bat b/Unreal/Environments/Blocks 4.18/package.bat
+new file mode 100644
+index 00000000..80f53ac6
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/package.bat	
+@@ -0,0 +1,64 @@
++@echo off
++REM //---------- set up variable ----------
++setlocal
++set ROOT_DIR=%~dp0
++
++set OutPath=%1
++set ToolPath=%2
++set UEVer=%3
++
++if "%UEVer%"=="" set "UEVer=4.18"
++
++set "_ToolPath=%PROGRAMFILES%\Epic Games\UE_%UEVer%\Engine\Build\BatchFiles"
++if "%ToolPath%"=="" set ToolPath=%_ToolPath%
++if "%ToolPath%"=="""" set ToolPath=%_ToolPath%
++
++IF NOT EXIST "%ToolPath%" (
++	echo "Unreal Engine build path %ToolPath% was not found"
++	goto :failed
++)
++
++if "%OutPath%"=="" set "OutPath=D:\AirSimBuilds"
++IF NOT EXIST "%ToolPath%" (
++	echo "Package output path %OutPath% was not found"
++	goto :failed
++)
++
++echo Using ToolPath = %ToolPath%
++echo Using OutPath = %OutPath%
++
++for %%f in (*.uproject) do (
++		echo Packaging: %%f
++		
++		"%ToolPath%\Build" "%%~nfEditor" Win64 Development -WarningsAsErrors "%cd%\%%f"
++		if ERRORLEVEL 1 goto :failed
++		
++		REM "%ToolPath%\RunUAT" -ScriptsForProject="%cd%\%%f" BuildCookRun -installed -nop4 -project="%cd%\%%f" -cook -stage -archive -archivedirectory="%OutPath%" -package -clientconfig=Development -ue4exe=UE4Editor-Cmd.exe -compressed -pak -prereqs -nodebuginfo -targetplatform=Win64 -build -utf8output -nocompile -nocompileeditor 
++		
++		REM "%ToolPath%\RunUAT" BuildCookRun -project="%cd%\%%f" -noP4 -platform=Win64 -clientconfig=Development -serverconfig=Development -cook -rocket -allmaps -build -stage -NoCompile -nocompileeditor -pak -archive -archivedirectory="%OutPath%"
++		
++		rmdir /s /q "%OutPath%\%%~nf"
++		
++		"%ToolPath%\RunUAT" BuildCookRun -project="%cd%\%%f" -noP4 -platform=Win64 -clientconfig=Development -cook -build -stage -pak -archive -archivedirectory="%OutPath%"  -utf8output -compressed -prereqs
++		if ERRORLEVEL 1 goto :failed
++		
++		move "%OutPath%\WindowsNoEditor" "%OutPath%\%%~nf"
++		if ERRORLEVEL 1 goto :failed
++		
++		@echo off
++		echo start %%~nf -windowed> "%OutPath%\%%~nf\run.bat"
++		if ERRORLEVEL 1 goto :failed
++)
++
++goto :done
++
++:failed
++echo "Error occured while packaging"
++echo "Usage: package.bat <path\to\output> <path to Engine\Build\BatchFiles> <UE Version>"
++exit /b 1
++
++:done
++if "%1"=="" pause
++
++	
++
+diff --git a/Unreal/Environments/Blocks 4.18/update_from_git.bat b/Unreal/Environments/Blocks 4.18/update_from_git.bat
+new file mode 100644
+index 00000000..9d865403
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/update_from_git.bat	
+@@ -0,0 +1,34 @@
++@echo off
++REM //---------- set up variable ----------
++setlocal
++set ROOT_DIR=%~dp0
++
++set AirSimPath=%1
++
++REM default path works for Blocks environment
++if "%AirSimPath%"=="" set "AirSimPath=..\..\.."
++
++IF NOT EXIST "%AirSimPath%" (
++	echo "AirSimPath %AirSimPath% was not found"
++	goto :failed
++)
++
++echo Using AirSimPath = %AirSimPath%
++
++robocopy /MIR "%AirSimPath%\Unreal\Plugins\AirSim" Plugins\AirSim /XD temp *. /njh /njs /ndl /np
++robocopy /MIR "%AirSimPath%\AirLib" Plugins\AirSim\Source\AirLib /XD temp *. /njh /njs /ndl /np
++robocopy  /njh /njs /ndl /np "%AirSimPath%\Unreal\Environments\Blocks" "." *.bat 
++robocopy  /njh /njs /ndl /np "%AirSimPath%\Unreal\Environments\Blocks" "." *.sh  
++rem robocopy /njh /njs /ndl /np "%AirSimPath%" "." *.gitignore
++
++cmd /c clean.bat
++cmd /c GenerateProjectFiles.bat
++
++goto :done
++
++:failed
++echo Error occured while updating.
++exit /b 1
++
++:done
++if "%1"=="" pause
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/update_from_git.sh b/Unreal/Environments/Blocks 4.18/update_from_git.sh
+new file mode 100644
+index 00000000..5ffd1a0c
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/update_from_git.sh	
+@@ -0,0 +1,15 @@
++#! /bin/bash
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++./clean.sh
++
++rsync -a  --exclude 'temp' --delete ../../Plugins/AirSim Plugins/
++rsync -a  --exclude 'temp' --delete ../../../AirLib Plugins/AirSim/Source/
++
++popd >/dev/null
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/update_to_git.bat b/Unreal/Environments/Blocks 4.18/update_to_git.bat
+new file mode 100644
+index 00000000..03995431
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/update_to_git.bat	
+@@ -0,0 +1,3 @@
++robocopy /MIR Plugins\AirSim ..\..\Plugins\AirSim /XD temp Intermediate Binaries Saved *. /njh /njs /ndl /np
++robocopy /MIR Plugins\AirSim\Source\AirLib ..\..\..\AirLib /XD temp Intermediate Binaries Saved *. /njh /njs /ndl /np
++pause
+\ No newline at end of file
+diff --git a/Unreal/Environments/Blocks 4.18/update_to_git.sh b/Unreal/Environments/Blocks 4.18/update_to_git.sh
+new file mode 100644
+index 00000000..a1bcb0ed
+--- /dev/null
++++ b/Unreal/Environments/Blocks 4.18/update_to_git.sh	
+@@ -0,0 +1,15 @@
++#! /bin/bash
++
++
++# get path of current script: https://stackoverflow.com/a/39340259/207661
++SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++pushd "$SCRIPT_DIR" >/dev/null
++
++set -e
++set -x
++
++rsync -a  --exclude 'temp' --delete Plugins/AirSim ../../Plugins/
++rsync -a  --exclude 'temp' --delete Plugins/AirSim/Source/AirLib ../../../
++
++popd >/dev/null
++set +x
+diff --git a/Unreal/Plugins/AirSim/Source/PawnSimApi.cpp b/Unreal/Plugins/AirSim/Source/PawnSimApi.cpp
+index 0543c18f..1af359ed 100644
+--- a/Unreal/Plugins/AirSim/Source/PawnSimApi.cpp
++++ b/Unreal/Plugins/AirSim/Source/PawnSimApi.cpp
+@@ -571,7 +571,20 @@ std::string PawnSimApi::getRecordFileLine(bool is_header_line) const
+     //return ss.str();
+ }
+ 
++msr::airlib::Pose VehiclePawnWrapper::getBoundingBox(std::string actor_name, std::string vehicle_name)
++{
++	//FVector2D retVal = FVector2D::ZeroVector;
++	//AActor* actor = UAirBlueprintLib::FindActor<AActor>(pawn_, FString(actor_name.c_str()));
++	
++	msr::airlib::Pose pose = msr::airlib::Pose();
++	
++	pose.position[0] = 1.0;
++	pose.position[1] = 2.0;
++	pose.position[2] = 3.0;
++	return pose;
++}
++
+ msr::airlib::VehicleApiBase* PawnSimApi::getVehicleApiBase() const
+ {
+     return nullptr;
+-}
+\ No newline at end of file
++}
+diff --git a/Unreal/Plugins/AirSim/Source/PawnSimApi.h b/Unreal/Plugins/AirSim/Source/PawnSimApi.h
+index ca1bad59..874b6b29 100644
+--- a/Unreal/Plugins/AirSim/Source/PawnSimApi.h
++++ b/Unreal/Plugins/AirSim/Source/PawnSimApi.h
+@@ -126,7 +126,9 @@ public: //Unreal specific methods
+ 
+     void possess();
+     void setRCForceFeedback(float rumble_strength, float auto_center);
+-
++    
++    virtual Pose getBoundingBox(std::string actor_name, std::string vehicle_name) const override;
++    
+ private: //methods
+     bool canTeleportWhileMove()  const;
+     void allowPassthroughToggleInput();

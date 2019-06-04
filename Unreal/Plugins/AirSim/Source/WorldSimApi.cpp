@@ -86,6 +86,30 @@ WorldSimApi::Pose WorldSimApi::getObjectPose(const std::string& object_name) con
     return result;
 }
 
+
+std::vector<float> WorldSimApi::getBoundingBox(const std::string &actor_name)
+{
+	bool bOnlyCol = true;
+	FVector Origin = FVector::ZeroVector;
+	FVector BoundsExtent = FVector::ZeroVector;
+	std::vector<float> returnVector;
+
+    UAirBlueprintLib::RunCommandOnGameThread([this, &actor_name, &Origin, &BoundsExtent, &bOnlyCol]() {
+        AActor* actor = UAirBlueprintLib::FindActor<AActor>(simmode_, FString(actor_name.c_str()));
+        printf("=========> %p\n", actor);
+        if (actor) {
+            actor->GetActorBounds(bOnlyCol, Origin, BoundsExtent);
+        }
+    }, true);
+
+    returnVector.push_back(BoundsExtent[0]/100);
+    returnVector.push_back(BoundsExtent[1]/100);
+    returnVector.push_back(BoundsExtent[2]/100);
+
+	return returnVector;
+}
+
+
 bool WorldSimApi::setObjectPose(const std::string& object_name, const WorldSimApi::Pose& pose, bool teleport)
 {
     bool result;

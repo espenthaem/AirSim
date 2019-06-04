@@ -200,11 +200,15 @@ RpcLibServerBase::RpcLibServerBase(ApiProvider* api_provider, const std::string&
     });
 
     pimpl_->server.bind("simGetObjectPose", [&](const std::string& object_name) -> RpcLibAdapatorsBase::Pose {
-        const auto& pose = getWorldSimApi()->getObjectPose(object_name); 
+        const auto& pose = getWorldSimApi()->getObjectPose(object_name);
         return RpcLibAdapatorsBase::Pose(pose);
     });
     pimpl_->server.bind("simSetObjectPose", [&](const std::string& object_name, const RpcLibAdapatorsBase::Pose& pose, bool teleport) -> bool {
         return getWorldSimApi()->setObjectPose(object_name, pose.to(), teleport);
+    });
+
+    pimpl_->server.bind("simGetBoundingBox", [&](const std::string& object_name) -> std::vector<float> {
+        return getWorldSimApi()->getBoundingBox(object_name);
     });
 
     pimpl_->server.bind("simGetGroundTruthKinematics", [&](const std::string& vehicle_name) -> RpcLibAdapatorsBase::KinematicsState {

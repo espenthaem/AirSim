@@ -90,7 +90,73 @@ def to_quaternion(pitch, roll, yaw):
     q.z_val = t1 * t2 * t4 - t0 * t3 * t5 #z
     return q
 
-    
+
+def rotation_matrix_from_angles(pry):
+    pitch = pry[0]
+    roll = pry[1]
+    yaw = pry[2]
+    sy = np.sin(yaw)
+    cy = np.cos(yaw)
+    sp = np.sin(pitch)
+    cp = np.cos(pitch)
+    sr = np.sin(roll)
+    cr = np.cos(roll)
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, cr, -sr],
+        [0, sr, cr]
+    ])
+
+    Ry = np.array([
+        [cp, 0, sp],
+        [0, 1, 0],
+        [-sp, 0, cp]
+    ])
+
+    Rz = np.array([
+        [cy, -sy, 0],
+        [sy, cy, 0],
+        [0, 0, 1]
+    ])
+
+    # Roll is applied first, then pitch, then yaw.
+    RyRx = np.matmul(Ry, Rx)
+    return np.matmul(Rz, RyRx)
+
+
+def project_3d_point_to_screen(subjectXYZ, camXYZ, camQuaternion, camProjMatrix4x4, imageWidthHeight):
+    # Turn the camera position into a column vector.
+    camPosition = np.transpose([camXYZ])
+
+    # Convert the camera's quaternion rotation to yaw, pitch, roll angles.
+    pitchRollYaw = to_eularian_angles(camQuaternion)
+
+    # Create a rotation matrix from camera pitch, roll, and yaw angles.
+    camRotation = rotation_matrix_from_angles(pitchRollYaw)
+
+    # Change coordinates to get subjectXYZ in the camera's local coordinate system.
+    XYZW = np.transpose([subjectXYZ])
+    XYZW = np.add(XYZW, -camPosition)
+    #print("XYZW: " + str(XYZW))
+    XYZW = np.matmul(np.transpose(camRotation), XYZW)
+    #print("XYZW derot: " + str(XYZW))
+
+    # Recreate the perspective projection of the camera.
+    XYZW = np.concatenate([XYZW, [[1]]])
+    XYZW = np.matmul(camProjMatrix4x4, XYZW)
+    XYZW = XYZW / XYZW[3]
+
+    # Move origin to the upper-left corner of the screen and multiply by size to get pixel values. Note that screen is in y,-z plane.
+    normX = (1 - XYZW[0]) / 2
+    normY = (1 + XYZW[1]) / 2
+
+    return np.array([
+        imageWidthHeight[0] * normX,
+        imageWidthHeight[1] * normY
+    ]).reshape(2, )
+
+
 def wait_key(message = ''):
     ''' Wait for a key press on the console and return it. '''
     if message != '':

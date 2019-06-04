@@ -418,6 +418,10 @@ std::unordered_map<std::string, msr::airlib::Pose> RpcLibClientBase::simGetBoneP
     return r;
 }
 
+std::vector<float> RpcLibClientBase::simGetBoundingBox(const std::string& object_name)
+{
+    return pimpl_->client.call("simGetBoundingBox", object_name).as<std::vector<float>>();
+}
 
 }} //namespace
 
